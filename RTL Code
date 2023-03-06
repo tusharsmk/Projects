@@ -1,0 +1,265 @@
+// Synthesizable RTL Code
+
+`define s0 4'b0
+`define s1 4'b1
+`define s2 4'b10
+`define s3 4'b11
+`define s4 4'b100
+`define s5 4'b101
+`define s6 4'b110
+`define s7 4'b111
+`define s8 4'b1000
+`define s9 4'b1001
+
+module lab(
+    input [3:0]sw,btn,
+    input clk,
+    output [15:0]led
+    );
+    reg [15:0]led;
+    wire [32:0]w;
+    reg [24:0]count=0;
+    assign clk2=count[24];
+    always@(posedge(clk)) count<=count+1;
+    always@(sw, clk2)
+    begin
+    casez(sw)
+    `s0: begin led=16'b0; #1 led[5]=w[0]; end                                                      // green blink
+    `s1: begin led=16'b0; #1 led[8:1]=w[8:1]; end                                                 // logic gates
+    `s2: begin led=16'b0; #1 led[3:2]=w[10:9]; end                                               // half adder
+    `s3: begin led=16'b0; #1 led[3:2]=w[12:11]; end                                             //full adder
+    `s4: begin led=16'b0; #1 led[12:5]=w[20:13]; end                                           // Demux
+    `s5: begin led=16'b0; #1 led[7]=w[23]; led[11]=w[22]; led[13]=w[21]; end                  //comparator 2 bit
+    `s6: begin led=16'b0; #1 led[12:9]=w[27:24]; end                                         //serial to parallel
+    `s7: begin led=16'b0; #1 led[15]=w[28]; led[0]=w[31]; led[13]=w[30]; led[14]=w[29]; end //mod 10 up counter
+    `s8: begin led=16'b0; #1 led[9]=w[32]; end                                             //parallel to serial
+    default: begin led=16'b0; #1 led[15]=w[0]; end                                        // red blink
+    endcase
+    end
+    
+    blink I1(clk, w[0]);
+    gates I2(btn[0],btn[1],w[8:1]);
+    half_adder I3(btn[0],btn[1],w[9],w[10]);
+    full_adder I4(btn[0],btn[1],btn[2],w[11],w[12]);
+    demux I5(btn[2:0],btn[3],w[20:13]);
+    comp_2bit I6(btn[1:0],btn[3:2],w[23:21]);
+    s2p I7(btn[0], btn[1], clk, w[27:24]);
+    mod_10 I8(btn[0],clk,w[31:28]);
+    p2s I9(btn,w[32],clk);
+    endmodule
+
+module blink(
+    input clk,
+    output led
+    );
+    reg [24:0]count=0;
+    assign led=count[24];
+    always@(posedge(clk)) count<=count+1;
+    endmodule
+
+module gates(
+    input a,
+    input b,
+    output [7:0]o
+    );
+    wire [7:0]o;
+    and(o[0],a,b);
+    nand(o[1],a,b);
+    not(o[2],a);
+    nor(o[3],a,b);
+    or(o[4],a,b);
+    xor(o[5],a,b);
+    xnor(o[6],a,b);
+    buf(o[7],a);
+endmodule
+
+module half_adder(
+    input a,
+    input b,
+    output Sum,
+    output Carry
+    );
+    and(Sum,a,b);
+    xor(Carry,a,b);
+endmodule
+
+module full_adder(
+    input a,
+    input b,
+    input Cin,
+    output sum,
+    output cout
+    );
+    wire [2:0]w;
+    xor(w[0],a,b);
+    xor(sum,w[0],Cin);
+    and(w[1],Cin,w[0]);
+    and(w[2],a,b);
+    or(cout,w[1],w[2]);
+endmodule
+
+module demux(
+    input [0:2] sel,
+    input in,
+    output [7:0]out
+    );
+    wire [10:0]w;
+    tri0 [7:0]out;
+    not(w[0],sel[0]);
+    not(w[1],sel[1]);
+    not(w[2],sel[2]);
+    and(w[3],w[0],w[1],w[2]);
+    and(w[4],w[0],sel[2],w[1]);
+    and(w[5],sel[1],w[2],w[0]);
+    and(w[6],sel[1],sel[2],w[0]);
+    and(w[7],sel[0],w[1],w[2]);
+    and(w[8],sel[0],sel[2],w[1]);
+    and(w[9],sel[0],sel[1],w[2]);
+    and(w[10],sel[0],sel[1],sel[2]);
+   
+    bufif1(out[0],in,w[3]);
+    bufif1(out[1],in,w[4]);
+    bufif1(out[2],in,w[5]);
+    bufif1(out[3],in,w[6]);
+    bufif1(out[4],in,w[7]);
+    bufif1(out[5],in,w[8]);
+    bufif1(out[6],in,w[9]);
+    bufif1(out[7],in,w[10]);
+endmodule
+
+module comp_1_bit(
+    input a,
+    input b,
+    output greater,
+    output less,
+    output equal
+    );
+    assign equal=~(a^b);
+    assign greater=a&(~b);
+    assign less=b&(~a);
+endmodule
+
+module comp_2bit(
+    input [1:0] a,
+    input [1:0] b,
+    output [2:0] out
+    );
+    wire w0,w1;
+    wire [1:0]greater,less,equal;
+    comp_1_bit func[1:0](a,b,greater,less,equal);
+    assign w0=0;
+    assign w1=1;
+    
+    assign out[0]=greater[1]?w1:(less[1]?w0:(greater[0]?w1:w0));
+    // out[0] represents a>b
+    assign out[1]=less[1]?w1:(greater[1]?w0:(less[0]?w1:w0));
+    // out[1] represents a<b
+    assign out[2]=equal[1]?(equal[0]?w1:w0):w0;
+    // out[2] represents a=b
+    
+endmodule
+
+module ff(
+    input d,
+    input clk,
+    input rst,
+    output Q
+    );
+    reg Q;
+    always@(posedge(clk))
+    begin
+    if(rst==1'b0) Q=d;
+    else Q=1'b0;
+    end
+endmodule
+
+module s2p(
+    input d,
+    input rst,
+    input clk,
+    output [0:3]Q
+    );
+    wire [1:0]newclk;
+    hzclk time1(clk,newclk);
+    ff I1(d,newclk[1],rst,Q[0]);
+    ff I2(Q[0],newclk[1],rst,Q[1]);
+    ff I3(Q[1],newclk[1],rst,Q[2]);
+    ff I4(Q[2],newclk[1],rst,Q[3]);
+    endmodule
+
+module mux(
+    input [3:0]in,
+    input [1:0]sel,
+    input clk,
+    output out
+    );
+    reg out;
+    always@(posedge(clk))
+    begin
+    casez(sel)
+    2'b0: out=in[0];
+    2'b1: out=in[1];
+    2'b10: out=in[2];
+    2'b11: out=in[3];
+    endcase
+    end
+    endmodule
+
+module hzclk(
+    input clk,
+    output [1:0]newclk
+    );
+    integer value1=0, value2=0;
+    parameter count1=9999999, count2=19999998;
+    reg [1:0]newclk;
+    always@(posedge(clk))
+    begin
+    if (value1==count1) value1<=0;
+    else value1<=value1+1;
+    if (value1==count1) newclk[0]=~newclk[0];
+    else newclk[0]=newclk[0];
+    
+    if (value2==count2) value2<=0;
+    else value2<=value2+1;
+    if (value2==count2) newclk[1]=~newclk[1];
+    else newclk[1]=newclk[1];
+    end
+    endmodule
+
+module p2s(
+    input [3:0]in,
+    output out,
+    input clk
+    );
+    wire [1:0]newclk;
+    hzclk time2(clk,newclk);
+    mux main(in,newclk,clk,out);
+endmodule
+
+module mod_10(
+    input in,
+    input clk,
+    output [3:0]out
+    );
+    reg [3:0]out, present_state;
+    hzclk time1(clk,newclk);
+    always@(posedge(newclk))
+    begin
+    if (in==1'b1) begin
+    casez(present_state)
+    `s0: begin out=`s0; present_state=`s1; end
+    `s1: begin out=`s1; present_state=`s2; end
+    `s2: begin out=`s2; present_state=`s3; end
+    `s3: begin out=`s3; present_state=`s4; end
+    `s4: begin out=`s4; present_state=`s5; end
+    `s5: begin out=`s5; present_state=`s6; end
+    `s6: begin out=`s6; present_state=`s7; end
+    `s7: begin out=`s7; present_state=`s8; end
+    `s8: begin out=`s8; present_state=`s9; end
+    `s9: begin out=`s9; present_state=`s0; end
+    default: present_state=`s0;
+    endcase
+    end
+    else begin out=4'b0; present_state=4'b1111; end
+    end
+endmodule
