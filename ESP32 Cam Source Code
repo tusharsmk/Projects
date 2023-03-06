@@ -1,0 +1,317 @@
+// Compile this code on Arduino IDE with the necessary library files and then deploy on the ESP32 Cam
+
+#include "WiFi.h"
+#include "esp_camera.h"
+#include "Arduino.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+#include "driver/rtc_io.h"
+#include <SPIFFS.h>
+#include <FS.h>
+#include <Firebase_ESP_Client.h>
+#include <addons/TokenHelper.h>
+#include "addons/RTDBHelper.h"
+//#include "FirebaseESP32.h"
+//#include "FirebaseESP8266.h"
+#define LED 4
+String currentDate;
+String formattedTime;
+
+//#include <ESP8266WiFi.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+// Define NTP Client to get time
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org");
+//Week Days
+String weekDays[7]={"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", 
+"Friday", "Saturday"};
+//Month names
+String months[12]={"January", "February", "March", "April", "May", "June", "July", 
+"August", "September", "October", "November", "December"};
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Enter your network credentials
+const char* ssid = "WIFI_SSID"; // Change WIFI_SSID with your WIFI Name
+const char* password = "PASSWORD"; // Change PASSWORD with your WIFI password
+#define API_KEY "XXXX" // Change XXXX with your FireBase API Key
+
+// ENter Authorized Email and Password
+#define USER_EMAIL "EMAIL"
+#define USER_PASSWORD "PASS"
+// Enter Firebase storage bucket ID
+#define STORAGE_BUCKET_ID "BUCKET"
+#define DATABASE_URL "URL"
+#define IMAGE_PATH "/pictures/image2.jpg"
+/////////////////////////////////////////////////////////////////////////////////////////////////
+#define call_bell 13
+#define relay 12
+#define led 4
+//#define button 2
+//String IMAGE_PATH;
+// OV2640 camera module pins (CAMERA_MODEL_AI_THINKER)
+#define PWDN_GPIO_NUM 32
+#define RESET_GPIO_NUM -1
+#define XCLK_GPIO_NUM 0
+#define SIOD_GPIO_NUM 26
+#define SIOC_GPIO_NUM 27
+#define Y9_GPIO_NUM 35
+#define Y8_GPIO_NUM 34
+#define Y7_GPIO_NUM 39
+#define Y6_GPIO_NUM 36
+#define Y5_GPIO_NUM 21
+#define Y4_GPIO_NUM 19
+#define Y3_GPIO_NUM 18
+#define Y2_GPIO_NUM 5
+#define VSYNC_GPIO_NUM 25
+#define HREF_GPIO_NUM 23
+#define PCLK_GPIO_NUM 22
+boolean new_image = true;
+String switch_status;
+String bell;
+
+FirebaseData fbdo;
+FirebaseAuth authentication;
+FirebaseConfig configuration;
+FirebaseJson json;
+bool done = false;
+bool check_photo( fs::FS &fs ) {
+ File f_pic = fs.open( IMAGE_PATH );
+ unsigned int pic_sz = f_pic.size();
+ return ( pic_sz > 1000 );
+}
+// Capture Photo and Save it to SPIFFS
+void captureSave_photo( void ) {
+ digitalWrite(LED, HIGH);
+ delay(1000);
+ camera_fb_t * fb = NULL;
+ bool ok = 0;
+ do {
+ Serial.println("ESP32-CAM capturing photo...");
+ fb = esp_camera_fb_get();
+ if (!fb) {
+ Serial.println("Failed");
+ return;
+ }
+ Serial.printf("Picture file name: %s\n", IMAGE_PATH);
+ File file = SPIFFS.open(IMAGE_PATH, FILE_WRITE);
+ if (!file) {
+ Serial.println("Failed to open file in writing mode");
+ 
+ }
+ else {
+ file.write(fb->buf, fb->len);
+ Serial.print("The picture has been saved in ");
+ Serial.print(IMAGE_PATH);
+ Serial.print(" - Size: ");
+ Serial.print(file.size());
+ Serial.println(" bytes");
+ }
+ file.close();
+ esp_camera_fb_return(fb);
+ ok = check_photo(SPIFFS);
+ } while ( !ok );
+ delay(100);
+ digitalWrite(LED,LOW);
+}
+
+void read_data()
+{
+  Firebase.RTDB.getString(&fbdo, "/switch/switch_status");
+  switch_status = fbdo.stringData();
+  //Serial.print("Data received: ");
+  //Serial.println(switch_status);
+
+  if (switch_status == "1")
+  {
+    digitalWrite(relay, HIGH);
+    //Serial.println("Relay ON ");
+  }
+  else if (switch_status == "0")
+  {
+    digitalWrite(relay, LOW);
+    //Serial.println("Relay OFF ");
+  }
+}
+
+void setup() {
+ Serial.begin(115200);
+// pinMode(button, INPUT);
+ WiFi.begin(ssid, password);
+ while (WiFi.status() != WL_CONNECTED) {
+ delay(1000);
+ Serial.println("Connecting to WiFi...");
+ }
+ if (!SPIFFS.begin(true)) {
+ Serial.println("An Error has occurred while mounting SPIFFS");
+ ESP.restart();
+ }
+ else {
+
+ delay(500);
+ Serial.println("SPIFFS mounted successfully");
+ }
+ pinMode (4,OUTPUT);
+ pinMode(2,INPUT);
+ /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ timeClient.begin();
+ timeClient.setTimeOffset(19800);
+ ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+ // initialize OV2640 camera module
+ camera_config_t config;
+ config.ledc_channel = LEDC_CHANNEL_0;
+ config.ledc_timer = LEDC_TIMER_0;
+ config.pin_d0 = Y2_GPIO_NUM;
+ config.pin_d1 = Y3_GPIO_NUM;
+ config.pin_d2 = Y4_GPIO_NUM;
+ config.pin_d3 = Y5_GPIO_NUM;
+ config.pin_d4 = Y6_GPIO_NUM;
+ config.pin_d5 = Y7_GPIO_NUM;
+ config.pin_d6 = Y8_GPIO_NUM;
+ config.pin_d7 = Y9_GPIO_NUM;
+ config.pin_xclk = XCLK_GPIO_NUM;
+ config.pin_pclk = PCLK_GPIO_NUM;
+ config.pin_vsync = VSYNC_GPIO_NUM;
+ config.pin_href = HREF_GPIO_NUM;
+ config.pin_sscb_sda = SIOD_GPIO_NUM;
+ config.pin_sscb_scl = SIOC_GPIO_NUM;
+ config.pin_pwdn = PWDN_GPIO_NUM;
+ config.pin_reset = RESET_GPIO_NUM;
+
+ config.xclk_freq_hz = 20000000;
+ config.pixel_format = PIXFORMAT_JPEG;
+ if (psramFound()) {
+ config.frame_size = FRAMESIZE_UXGA;
+ config.jpeg_quality = 10;
+ config.fb_count = 2;
+ } else {
+ config.frame_size = FRAMESIZE_SVGA;
+ config.jpeg_quality = 10;
+ config.fb_count = 1;
+ }
+ esp_err_t err = esp_camera_init(&config);
+ if (err != ESP_OK) {
+ Serial.printf("Camera init failed with error 0x%x", err);
+ ESP.restart();
+ }
+ configuration.api_key = API_KEY;
+ configuration.database_url = DATABASE_URL;
+ authentication.user.email = USER_EMAIL;
+ authentication.user.password = USER_PASSWORD;
+ configuration.token_status_callback = tokenStatusCallback;
+ Firebase.begin(&configuration, &authentication);
+ Firebase.reconnectWiFi(true);
+}
+void loop() {
+//  if(digitalRead(button)== HIGH){
+//    ESP.restart();}
+
+timeClient.update();
+ time_t epochTime = timeClient.getEpochTime();
+// Serial.print("Epoch Time: ");
+// Serial.println(epochTime);
+ 
+ String formattedTime = timeClient.getFormattedTime();
+// Serial.print("Formatted Time: ");
+// Serial.println(formattedTime); 
+ int currentHour = timeClient.getHours();
+ int currentMinute = timeClient.getMinutes();
+ 
+ int currentSecond = timeClient.getSeconds();
+ String weekDay = weekDays[timeClient.getDay()]; 
+ //Get a time structure
+ struct tm *ptm = gmtime ((time_t *)&epochTime); 
+ int monthDay = ptm->tm_mday;
+ int currentMonth = ptm->tm_mon+1;
+ String currentMonthName = months[currentMonth-1];
+ int currentYear = ptm->tm_year+1900;
+ //Print complete date:
+ 
+ String currentDate = String(currentYear) + "-" + String(currentMonth) + "-" + 
+String(monthDay);
+
+read_data();
+//
+////digitalWrite(LED, HIGH);
+//// if (digitalRead(2)==HIGH);{
+// if (new_image) {
+// captureSave_photo();
+// new_image = false;
+// }
+// delay(1);
+// if (Firebase.ready() && !done) {
+// done = true;
+// Serial.print("Uploading Photo... ");
+// digitalWrite(LED, LOW);
+// if (Firebase.Storage.upload (&fbdo, STORAGE_BUCKET_ID, IMAGE_PATH, 
+//mem_storage_type_flash, formattedTime, "image/jpeg" ))
+// {
+// Serial.printf("\nDownload URL: %s\n", fbdo.downloadURL().c_str());
+// String link = fbdo.downloadURL().c_str();
+// int a=0;
+// json.add("URL", link);
+////Department of Electronics and Communication Engineering, PIET, Samalkha
+//24
+//if (Firebase.RTDB.pushJSON(&fbdo, "/test/append", 
+//&json)&&Firebase.RTDB.setString(&fbdo, "latest", link)) {
+// Serial.println(fbdo.dataPath());
+// Serial.println(fbdo.pushName());
+// Serial.println(fbdo.dataPath() + "/"+ fbdo.pushName());
+//} else {
+// Serial.println(fbdo.errorReason());
+// Serial.print("rt");
+//} 
+//// if (Firebase.RTDB.setInt(&fbdo, "/Firebaseold/images", a))
+//// {
+//// Serial.println("Success");
+//// }
+// }
+// else {
+// Serial.println(fbdo.errorReason());
+// }
+// }
+
+
+  if (digitalRead(call_bell) == HIGH)
+  {
+    //send_data();
+    Firebase.RTDB.setString(&fbdo, "/switch/call_bell", "1");
+    //Serial.println("Door Bell Pressed");
+    if (new_image)
+    {
+      captureSave_photo();
+    }
+    delay(1);
+    //Serial.print("Uploading Photo... ");
+    if (Firebase.Storage.upload (&fbdo, STORAGE_BUCKET_ID, IMAGE_PATH, mem_storage_type_flash, formattedTime, "image/jpeg"))
+    {
+      Serial.printf("\nDownload URL: %s\n", fbdo.downloadURL().c_str());
+      String link = fbdo.downloadURL().c_str();
+      int a = 0;
+      json.add("URL", link);
+      if (Firebase.RTDB.pushJSON(&fbdo, "/test/append", &json) && Firebase.RTDB.setString(&fbdo, "latest", link)) {
+        Serial.println(fbdo.dataPath());
+        Serial.println(fbdo.pushName());
+        Serial.println(fbdo.dataPath() + "/" + fbdo.pushName());
+      } else {
+        Serial.println(fbdo.errorReason());
+        Serial.print("rt");
+      }
+
+      if (Firebase.RTDB.pushInt(&fbdo, "/Firebaseold/images", a))
+      {
+        Serial.println("Success");
+      }
+    }
+    else
+    {
+      Serial.println(fbdo.errorReason());
+    }
+  }
+  else
+  {
+    Firebase.RTDB.setString(&fbdo, "/switch/call_bell", "0");
+  }
+
+}
