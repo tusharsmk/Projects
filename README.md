@@ -1,4 +1,4 @@
-# Projects
+## Projects
 # Project FPGA
 • Integrated all my 10 academic lab programs in a single pro-
 gram with the help of Xilinx Vivado 2020.1 and Verilog HDL
