@@ -1,0 +1,32 @@
+// Write this code on Arduino Cloud and then deploy on the device
+
+#include "thingProperties.h"
+
+void setup() {
+  pinMode(D2,OUTPUT);
+  pinMode(D3,OUTPUT);
+  Serial.begin(9600);
+  delay(1500);
+  initProperties();
+
+  ArduinoCloud.begin(ArduinoIoTPreferredConnection); // Connect to Arduino IoT Cloud
+  
+  setDebugMessageLevel(2);
+  ArduinoCloud.printDebugInfo();
+}
+
+void loop() {
+  ArduinoCloud.update();
+}
+
+void onLedChange()  {
+  if (led==1)
+ {
+digitalWrite(D2,HIGH); // update this pin if your led is connected with another gpio
+ }
+if (led==0)
+ {
+digitalWrite(D2,LOW);
+ }
+ 
+}
